@@ -6,6 +6,17 @@ import os
 import math
 import re
 
+FORMATS = ["source", "mp3", "flac", "ogg", "wav", "m4a"]
+
+FORMAT_CODECS = {
+    "source": None,
+    "mp3":    ["-c:a", "libmp3lame", "-q:a", "2"],
+    "flac":   ["-c:a", "flac"],
+    "ogg":    ["-c:a", "libvorbis", "-q:a", "4"],
+    "wav":    ["-c:a", "pcm_s16le"],
+    "m4a":    ["-c:a", "aac", "-b:a", "192k"],
+}
+
 class Splittr:
     def __init__(self):
         self.window = tk.Tk()
@@ -25,6 +36,8 @@ class Splittr:
         self.equal_parts = tk.StringVar(value="5")
         self.parts_preview = tk.StringVar(value="")
         self.name_preview = tk.StringVar(value="")
+
+        self.output_format = tk.StringVar(value="source")
 
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_label = tk.StringVar(value="")
@@ -55,9 +68,17 @@ class Splittr:
 
         # naming
         ttk.Label(main, text="output name").pack(anchor="w")
-        ttk.Entry(main, textvariable=self.output_name).pack(fill="x", pady=(0, 8))
+        ttk.Entry(main, textvariable=self.output_name).pack(fill="x", pady=(0, 4))
         self.name_preview_label = ttk.Label(main, textvariable=self.name_preview, font=("", 9))
-        self.name_preview_label.pack(anchor="w", pady=(0, 8))
+        self.name_preview_label.pack(anchor="w", pady=(0, 4))
+
+        # format
+        fmt_frame = ttk.Frame(main)
+        fmt_frame.pack(fill="x", pady=(0, 8))
+        ttk.Label(fmt_frame, text="output format").pack(side="left", padx=(0, 8))
+        fmt_combo = ttk.Combobox(fmt_frame, textvariable=self.output_format,
+                                 values=FORMATS, state="readonly", width=12)
+        fmt_combo.pack(side="left")
 
         # separator
         ttk.Separator(main).pack(fill="x", pady=(0, 8))
@@ -116,6 +137,7 @@ class Splittr:
         self.segment_time_s.trace_add("write", lambda *_: self._schedule_preview())
         self.equal_parts.trace_add("write", lambda *_: self._schedule_preview())
         self.output_name.trace_add("write", lambda *_: self._update_name_preview())
+        self.output_format.trace_add("write", lambda *_: self._update_name_preview())
 
     def _make_time_entry(self, parent, var, width):
         e = ttk.Entry(parent, textvariable=var, width=width)
@@ -150,7 +172,10 @@ class Splittr:
             self.equal_frame.pack(fill="x", pady=(0, 4))
         self._schedule_preview()
 
-    def _get_source_ext(self):
+    def _get_output_ext(self):
+        fmt = self.output_format.get()
+        if fmt != "source":
+            return f".{fmt}"
         path = self.input_file.get()
         if not path:
             return ".mp3"
@@ -159,7 +184,7 @@ class Splittr:
 
     def _update_name_preview(self):
         name = self.output_name.get()
-        ext = self._get_source_ext()
+        ext = self._get_output_ext()
         if not name.strip():
             self.name_preview.set("")
             return
@@ -240,10 +265,17 @@ class Splittr:
 
     def _make_ffmpeg_template(self):
         name = self.output_name.get()
-        ext = self._get_source_ext()
+        ext = self._get_output_ext()
         if not name.strip():
             return f"output_%01d{ext}"
         return f"{name}%01d{ext}"
+
+    def _get_output_codec_args(self):
+        fmt = self.output_format.get()
+        codec = FORMAT_CODECS.get(fmt)
+        if codec is None:
+            return ["-c", "copy"]
+        return codec
 
     def _start_split(self):
         if self.running:
@@ -302,14 +334,14 @@ class Splittr:
                 return
 
             out_template = os.path.join(output_dir, ffmpeg_template)
+            codec_args = self._get_output_codec_args()
             cmd = [
                 "ffmpeg", "-y",
                 "-i", input_path,
                 "-f", "segment",
                 "-segment_time", seg_str,
-                "-c", "copy",
-                out_template
-            ]
+                "-segment_start_number", "1",
+            ] + codec_args + [out_template]
 
             self._run_ffmpeg_with_progress(cmd, total_parts, input_path, seg_secs, output_dir)
         except Exception as e:
@@ -338,14 +370,14 @@ class Splittr:
             seg_str = f"{h:02d}:{m:02d}:{int(s):02d}"
 
             out_template = os.path.join(output_dir, ffmpeg_template)
+            codec_args = self._get_output_codec_args()
             cmd = [
                 "ffmpeg", "-y",
                 "-i", input_path,
                 "-f", "segment",
                 "-segment_time", seg_str,
-                "-c", "copy",
-                out_template
-            ]
+                "-segment_start_number", "1",
+            ] + codec_args + [out_template]
 
             self._run_ffmpeg_with_progress(cmd, n, input_path, seg_secs, output_dir)
         except Exception as e:
